@@ -19,6 +19,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: agent-selftest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -37,9 +39,15 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # Releases are used instead of artifacts: release assets don't count
+      # toward the Actions storage quota on private repos.
+      - name: Upload APK to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: hosts-monitor-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          tag_name: apk
+          name: APK builds
+          body: "Свежая debug-сборка приложения (обновляется при каждом пуше в main)"
+          files: app/build/outputs/apk/debug/*.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
