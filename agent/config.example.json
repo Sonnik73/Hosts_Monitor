@@ -1,0 +1,13 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 8443,
+  "token": "CHANGE-ME-to-a-long-random-string",
+  "mounts": ["/", "/var"],
+  "services": ["nginx", "matrix-synapse", "wireguard"],
+  "peers": [
+    { "name": "matrix", "host": "10.0.0.10", "port": 8443 },
+    { "name": "vpn", "host": "10.0.0.20", "port": 443 },
+    { "name": "relay", "host": "10.0.0.30", "port": 22 }
+  ],
+  "top_processes_limit": 5
+}

@@ -1,0 +1,18 @@
+# Gradle
+.gradle/
+build/
+app/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+local.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / real agent config (never commit the real one)
+agent/config.json
+*.keystore

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hosts Monitor</string>
+    <string name="notif_channel_alerts">Алерты серверов</string>
+    <string name="notif_channel_alerts_desc">Уведомления о недоступных серверах и сервисах</string>
+</resources>
