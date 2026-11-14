@@ -19,7 +19,16 @@ data class AppSettings(
     val diskWarnPct: Int = 85,
     val diskCritPct: Int = 95,
     val theme: String = "system", // "system" | "light" | "dark"
-)
+) {
+    companion object {
+        /** Severity bucket for a percentage metric: 0 = ok, 1 = warn, 2 = critical. */
+        fun severity(pct: Double, warn: Int, crit: Int): Int = when {
+            pct >= crit -> 2
+            pct >= warn -> 1
+            else -> 0
+        }
+    }
+}
 
 /** Non-secret settings in DataStore. Server URLs + tokens live in [SecureStore]. */
 class SettingsStore(private val context: Context) {
@@ -58,15 +67,6 @@ class SettingsStore(private val context: Context) {
             p[Keys.DISK_WARN] = s.diskWarnPct
             p[Keys.DISK_CRIT] = s.diskCritPct
             p[Keys.THEME] = s.theme
-        }
-    }
-
-    companion object {
-        /** Severity bucket for a percentage metric: 0 = ok, 1 = warn, 2 = critical. */
-        fun severity(pct: Double, warn: Int, crit: Int): Int = when {
-            pct >= crit -> 2
-            pct >= warn -> 1
-            else -> 0
         }
     }
 }
