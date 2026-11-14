@@ -22,6 +22,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -96,6 +97,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
                 )
             }
             item {
+                UpdateSection(appVersion)
+            }
+            item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Установка агента", style = MaterialTheme.typography.titleMedium)
@@ -166,6 +170,112 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
             }
         )
     }
+}
+
+@Composable
+private fun UpdateSection(currentVersion: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("Сборка публикуется в GitHub Releases при каждом изменении.") }
+    var updateInfo by remember { mutableStateOf<com.servermon.monitor.net.UpdateChecker.UpdateInfo?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Обновление", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Текущая версия: v$currentVersion",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            updateInfo?.let { info ->
+                Text(
+                    "Доступна версия v${info.versionName}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(status, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            try {
+                                val latest = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.servermon.monitor.net.UpdateChecker.checkLatest()
+                                }
+                                val currentCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(
+                                    context.packageManager.getPackageInfo(context.packageName, 0)
+                                )
+                                when {
+                                    latest == null -> status = "В релизе нет version.json — обновитесь вручную один раз"
+                                    latest.versionCode > currentCode -> {
+                                        updateInfo = latest
+                                        status = "Найдено обновление до v${latest.versionName}"
+                                    }
+                                    else -> {
+                                        updateInfo = null
+                                        status = "У вас последняя версия (v$currentVersion)"
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                status = "Ошибка проверки: ${e.message}"
+                            }
+                            busy = false
+                        }
+                    }
+                ) {
+                    Text("Проверить")
+                }
+                Button(
+                    enabled = !busy && updateInfo != null,
+                    onClick = {
+                        val info = updateInfo ?: return@Button
+                        busy = true
+                        status = "Скачиваю ${info.apkName}…"
+                        scope.launch {
+                            try {
+                                val file = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.servermon.monitor.net.UpdateChecker.downloadApk(context, info.apkUrl, info.apkName)
+                                }
+                                status = "Запускаю установку через Android…"
+                                installApk(context, file)
+                                status = "Установщик открыт — подтвердите установку"
+                            } catch (e: Exception) {
+                                status = "Ошибка: ${e.message}"
+                            }
+                            busy = false
+                        }
+                    }
+                ) {
+                    Text(if (busy) "…" else "Установить")
+                }
+            }
+        }
+    }
+}
+
+private fun installApk(context: android.content.Context, file: java.io.File) {
+    if (!context.packageManager.canRequestPackageInstalls()) {
+        val intent = android.content.Intent(
+            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            android.net.Uri.parse("package:com.servermon.monitor"),
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return
+    }
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, "com.servermon.monitor.fileprovider", file
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive")
+        .addFlags(
+            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+        )
+    context.startActivity(intent)
 }
 
 @Composable

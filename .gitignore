@@ -15,7 +15,10 @@ Thumbs.db
 
 # Secrets / real agent config (never commit the real one)
 agent/config.json
+# Keystores are ignored EXCEPT ci/ci-sign.keystore, which IS committed on
+# purpose: a stable signature is required so in-app updates install cleanly.
 *.keystore
+!ci/ci-sign.keystore
 
 # ZCode session files
 .zcode/

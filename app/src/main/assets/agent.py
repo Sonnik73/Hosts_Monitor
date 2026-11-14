@@ -191,15 +191,24 @@ def get_top_processes(limit=15):
 
 
 def get_failed_ssh_logins(since="-24h"):
-    """Count failed SSH password attempts in the given window."""
+    """Count failed SSH password attempts; cached — journalctl over 24h of logs
+    is the most expensive call here and shouldn't run on every request."""
+    global _ssh_cache
+    now = time.time()
+    with _ssh_cache_lock:
+        if _ssh_cache and now - _ssh_cache[0] < SSH_CACHE_TTL:
+            return _ssh_cache[1]
     try:
         out = subprocess.run(
             ["journalctl", "_COMM=sshd", "--since", since, "--no-pager", "-q"],
             capture_output=True, text=True, timeout=10,
         ).stdout
-        return sum(1 for line in out.splitlines() if "Failed password" in line or "Invalid user" in line)
+        count = sum(1 for line in out.splitlines() if "Failed password" in line or "Invalid user" in line)
     except (OSError, subprocess.SubprocessError):
         return None  # journalctl missing or not permitted
+    with _ssh_cache_lock:
+        _ssh_cache = (now, count)
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +360,36 @@ def get_watched_processes(names):
 # Peer connectivity + relayed state
 # ---------------------------------------------------------------------------
 
+PEER_CACHE_TTL = 60  # seconds — dampens poll cascades (app polls agent, agent polls peers)
+SSH_CACHE_TTL = 300  # seconds
+
+_peer_cache_lock = threading.Lock()
+_peer_cache = None  # (timestamp, peers list)
+_ssh_cache_lock = threading.Lock()
+_ssh_cache = None  # (timestamp, count)
+
+
+def get_peers_cached(config):
+    """Peer checks (TCP + HTTP fetch of peer metrics) cached for PEER_CACHE_TTL."""
+    global _peer_cache
+    now = time.time()
+    with _peer_cache_lock:
+        if _peer_cache and now - _peer_cache[0] < PEER_CACHE_TTL:
+            return _peer_cache[1]
+
+    peers_cfg = [p for p in config.get("peers", []) if isinstance(p, dict)]
+    own_ips = get_own_ips()
+    own_hostname = get_hostname()
+    token = (config.get("token") or "").strip()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        peers = list(ex.map(lambda p: check_peer(p, own_ips, own_hostname, token), peers_cfg))
+    # drop self-entries from the report — the app knows who is who
+    peers = [p for p in peers if p.get("ok") is not None]
+
+    with _peer_cache_lock:
+        _peer_cache = (now, peers)
+    return peers
+
 def _fetch_peer_summary(host, port, token):
     """Fetch a peer's /metrics.json and extract a small summary (no recursion)."""
     url = "http://%s:%s/metrics.json" % (host, port)
@@ -458,14 +497,7 @@ def collect_metrics(config, sampler):
         proc_names = []
     watched_processes = get_watched_processes([p for p in proc_names if isinstance(p, str)])
 
-    peers_cfg = [p for p in config.get("peers", []) if isinstance(p, dict)]
-    own_ips = get_own_ips()
-    own_hostname = get_hostname()
-    token = (config.get("token") or "").strip()
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        peers = list(ex.map(lambda p: check_peer(p, own_ips, own_hostname, token), peers_cfg))
-    # drop self-entries from the report — the app knows who is who
-    peers = [p for p in peers if p.get("ok") is not None]
+    peers = get_peers_cached(config)
 
     with sampler.lock:
         cpu_pct = sampler.cpu_pct
@@ -473,7 +505,7 @@ def collect_metrics(config, sampler):
     return {
         "agent_version": 2,
         "timestamp": int(time.time()),
-        "hostname": own_hostname,
+        "hostname": get_hostname(),
         "uptime_sec": get_uptime_seconds(),
         "cpu": {
             "cores": get_cpu_count(),

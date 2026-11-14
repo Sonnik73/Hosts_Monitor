@@ -13,8 +13,8 @@ android {
         applicationId = "com.servermon.monitor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.3.2"
+        versionCode = 6
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -22,7 +22,20 @@ android {
         }
     }
 
+    signingConfigs {
+        create("shared") {
+            // Stable key: every build (CI or local) is signed identically, so
+            // in-app updates install over the previous version.
+            storeFile = file("../ci/ci-sign.keystore")
+            storePassword = "servermon"
+            keyAlias = "servermon"
+            keyPassword = "servermon"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

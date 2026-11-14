@@ -43,15 +43,20 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       # Releases are used instead of artifacts: release assets don't count
-      # toward the Actions storage quota on private repos.
-      - name: Publish APK to Release (versioned name)
+      # toward the Actions storage quota. The repo is public, so the app can
+      # download updates without any token.
+      - name: Publish APK to Release (versioned name + version.json)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)
           cp app/build/outputs/apk/debug/app-debug.apk "hosts-monitor-v${VERSION}.apk"
-          gh release create apk --title "APK builds" --notes "Свежая debug-сборка (обновляется при каждом пуше в main). Версия приложения: v${VERSION}" 2>/dev/null || true
+          printf '{"versionName":"%s","versionCode":%s,"apk":"hosts-monitor-v%s.apk"}\n' \
+            "$VERSION" "$CODE" "$VERSION" > app/build/outputs/apk/version.json
+          gh release create apk --title "APK builds" \
+            --notes "Свежая сборка (обновляется при каждом пуше в main). Версия: v${VERSION}. Обновление внутри приложения: Настройки → Проверить обновления." 2>/dev/null || true
           for a in $(gh release view apk --json assets --jq '.assets[].name' 2>/dev/null); do
             gh release delete-asset apk "$a" -y
           done
-          gh release upload apk "hosts-monitor-v${VERSION}.apk" --clobber
+          gh release upload apk "hosts-monitor-v${VERSION}.apk" app/build/outputs/apk/version.json --clobber
