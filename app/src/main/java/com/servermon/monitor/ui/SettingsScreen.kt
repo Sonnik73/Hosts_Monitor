@@ -1,5 +1,6 @@
 package com.servermon.monitor.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -101,7 +104,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
                 UpdateSection(appVersion)
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                Card(
+        Modifier.fillMaxWidth(),
+        shape = com.servermon.monitor.ui.theme.CardShape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+    ) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Установка агента", style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -122,7 +131,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
                     color = MaterialTheme.colorScheme.primary)
             }
             items(servers, key = { it.id }) { server ->
-                Card(Modifier.fillMaxWidth()) {
+                Card(
+        Modifier.fillMaxWidth(),
+        shape = com.servermon.monitor.ui.theme.CardShape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+    ) {
                     Row(
                         Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -151,7 +166,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
             }
 
             item {
-                ThemeSection(settings, settingsStore, scope, context)
+                AppearanceSection(settings, settingsStore, scope, context)
             }
         }
     }
@@ -181,7 +196,13 @@ private fun UpdateSection(currentVersion: String) {
     var updateInfo by remember { mutableStateOf<com.servermon.monitor.net.UpdateChecker.UpdateInfo?>(null) }
     var busy by remember { mutableStateOf(false) }
 
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = com.servermon.monitor.ui.theme.CardShape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Обновление", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -358,17 +379,27 @@ private fun NumberField(
 }
 
 @Composable
-private fun ThemeSection(
+private fun AppearanceSection(
     settings: AppSettings,
     settingsStore: SettingsStore,
     scope: kotlinx.coroutines.CoroutineScope,
     context: android.content.Context,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = com.servermon.monitor.ui.theme.CardShape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+    ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Тема", style = MaterialTheme.typography.titleSmall)
-            for ((label, value) in listOf("Системная" to "system", "Светлая" to "light", "Тёмная" to "dark")) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Оформление", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text("Тема", style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            for ((label, value) in listOf("Как в системе" to "system", "Светлая" to "light", "Тёмная" to "dark")) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 0.dp)) {
                     RadioButton(
                         selected = settings.theme == value,
                         onClick = {
@@ -381,7 +412,66 @@ private fun ThemeSection(
                     Text(label)
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+            Text("Палитра", style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            for (palette in com.servermon.monitor.ui.theme.ThemePalette.entries) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()) {
+                    RadioButton(
+                        selected = settings.palette == palette.name,
+                        onClick = {
+                            scope.launch {
+                                settingsStore.save(settings.copy(palette = palette.name))
+                                PollWorker.schedule(context, settings.pollIntervalMinutes.toLong())
+                            }
+                        }
+                    )
+                    Text(palette.title)
+                    Spacer(Modifier.weight(1f))
+                    PaletteDot(palette)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Чёрный AMOLED-фон", modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Switch(
+                    checked = settings.pureBlack,
+                    onCheckedChange = { on ->
+                        scope.launch {
+                            settingsStore.save(settings.copy(pureBlack = on))
+                            PollWorker.schedule(context, settings.pollIntervalMinutes.toLong())
+                        }
+                    }
+                )
+            }
+            Text(
+                "Только для тёмной темы: фон полностью чёрный, экран экономит заряд на OLED.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+
+/** Кружок-превью палитры: два кружка — акцент тёмной и светлой темы. */
+@Composable
+private fun PaletteDot(palette: com.servermon.monitor.ui.theme.ThemePalette) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .size(18.dp)
+                .background(palette.darkPrimary, CircleShape)
+        )
+        Spacer(Modifier.padding(start = 4.dp))
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .size(18.dp)
+                .background(palette.lightPrimary, CircleShape)
+        )
     }
 }
 

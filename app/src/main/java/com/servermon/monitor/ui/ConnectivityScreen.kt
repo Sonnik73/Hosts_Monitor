@@ -73,7 +73,12 @@ fun ConnectivityScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                Card {
+                Card(
+                    shape = com.servermon.monitor.ui.theme.CardShape,
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
                             "Строка — «откуда» (агент сервера), столбец — «куда» (peer из конфига).",

@@ -172,7 +172,11 @@ private fun ServerCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick),
+        shape = com.servermon.monitor.ui.theme.CardShape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(

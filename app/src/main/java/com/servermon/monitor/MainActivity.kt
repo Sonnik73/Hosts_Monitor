@@ -44,7 +44,11 @@ class MainActivity : ComponentActivity() {
                 PollWorker.schedule(context, settings.pollIntervalMinutes.toLong())
             }
 
-            HostsMonitorTheme(themeMode = settings.theme) {
+            HostsMonitorTheme(
+                themeMode = settings.theme,
+                paletteName = settings.palette,
+                pureBlack = settings.pureBlack,
+            ) {
                 val nav = rememberNavController()
                 NavHost(navController = nav, startDestination = "dashboard") {
                     composable("dashboard") {

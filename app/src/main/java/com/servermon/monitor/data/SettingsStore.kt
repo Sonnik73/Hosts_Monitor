@@ -1,6 +1,7 @@
 package com.servermon.monitor.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -19,6 +20,8 @@ data class AppSettings(
     val diskWarnPct: Int = 85,
     val diskCritPct: Int = 95,
     val theme: String = "system", // "system" | "light" | "dark"
+    val palette: String = "STEEL",
+    val pureBlack: Boolean = false,
 ) {
     companion object {
         /** Severity bucket for a percentage metric: 0 = ok, 1 = warn, 2 = critical. */
@@ -42,6 +45,8 @@ class SettingsStore(private val context: Context) {
         val DISK_WARN = intPreferencesKey("disk_warn_pct")
         val DISK_CRIT = intPreferencesKey("disk_crit_pct")
         val THEME = stringPreferencesKey("theme")
+        val PALETTE = stringPreferencesKey("palette")
+        val PURE_BLACK = booleanPreferencesKey("pure_black")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -54,6 +59,8 @@ class SettingsStore(private val context: Context) {
             diskWarnPct = p[Keys.DISK_WARN] ?: 85,
             diskCritPct = p[Keys.DISK_CRIT] ?: 95,
             theme = p[Keys.THEME] ?: "system",
+            palette = p[Keys.PALETTE] ?: "STEEL",
+            pureBlack = p[Keys.PURE_BLACK] ?: false,
         )
     }
 
@@ -67,6 +74,8 @@ class SettingsStore(private val context: Context) {
             p[Keys.DISK_WARN] = s.diskWarnPct
             p[Keys.DISK_CRIT] = s.diskCritPct
             p[Keys.THEME] = s.theme
+            p[Keys.PALETTE] = s.palette
+            p[Keys.PURE_BLACK] = s.pureBlack
         }
     }
 }
