@@ -22,6 +22,7 @@ import com.servermon.monitor.ui.ConnectivityScreen
 import com.servermon.monitor.ui.DashboardScreen
 import com.servermon.monitor.ui.ServerDetailScreen
 import com.servermon.monitor.ui.SettingsScreen
+import com.servermon.monitor.ui.WatchSelectScreen
 import com.servermon.monitor.ui.theme.HostsMonitorTheme
 import com.servermon.monitor.work.PollWorker
 
