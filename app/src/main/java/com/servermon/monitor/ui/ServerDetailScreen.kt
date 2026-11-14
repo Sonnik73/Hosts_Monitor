@@ -85,16 +85,84 @@ fun ServerDetailScreen(
             )
         }
     ) { padding ->
+        // Relay view: if the phone can't reach this server but a peer agent can,
+        // show the peer's report instead of a raw connection error.
+        val relay = if (serverState == null || !serverState.online) {
+            val name = server?.name ?: ""
+            repo.states.value.values.firstOrNull { o ->
+                o.online && o.config.id != serverId &&
+                    o.metrics?.peers?.any { it.name == name && it.ok } == true
+            }?.let { o -> o.config.name to o.metrics!!.peers.first { it.name == name } }
+        } else null
+
         when {
-            serverState == null -> Text(
-                "Нет данных. Нажмите «Обновить».",
-                modifier = Modifier.padding(padding).padding(16.dp),
-            )
-            else -> DetailContent(
+            serverState != null && serverState.online -> DetailContent(
                 serverState = serverState,
                 settings = settings,
                 history = repo.historyOf(serverId),
                 modifier = Modifier.padding(padding),
+            )
+            relay != null && relay.second.ok -> RelayCard(
+                viaName = relay.first,
+                state = relay.second.state,
+                rawError = serverState?.error,
+                modifier = Modifier.padding(padding),
+            )
+            serverState != null -> Text(
+                "Последняя ошибка: ${serverState.error}",
+                modifier = Modifier.padding(padding).padding(16.dp),
+                color = MaterialTheme.colorScheme.error,
+            )
+            else -> Text(
+                "Нет данных. Нажмите «Обновить».",
+                modifier = Modifier.padding(padding).padding(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RelayCard(
+    viaName: String,
+    state: com.servermon.monitor.data.PeerState?,
+    rawError: String?,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Доступен через $viaName",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = severityColor(1),
+                    )
+                }
+                if (state != null) {
+                    KeyValue("Hostname", state.hostname)
+                    KeyValue("Uptime", formatUptime(state.uptimeSec))
+                    KeyValue("CPU", "%.0f%%".format(state.cpuPct))
+                    KeyValue("Память", "%.0f%%".format(state.memPct))
+                } else {
+                    Text(
+                        "Сосед видит этот сервер (TCP), но метрики передать не смог.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    "Прямой опрос с телефона сейчас не проходит — состояние передаёт сосед. " +
+                        "Это сетевая особенность вашего пути к серверу, не проблема агента.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (rawError != null) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Последняя ошибка прямого опроса: $rawError",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
