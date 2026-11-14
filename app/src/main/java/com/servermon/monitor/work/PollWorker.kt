@@ -44,6 +44,7 @@ class PollWorker(appContext: Context, params: WorkerParameters) :
                     badServices = badServices,
                 )
             }
+            com.servermon.monitor.widget.WidgetUpdater.updateAll(context)
             Result.success()
         } catch (e: Exception) {
             Result.retry()

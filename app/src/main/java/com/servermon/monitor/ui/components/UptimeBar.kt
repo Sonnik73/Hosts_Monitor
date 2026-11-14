@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.servermon.monitor.data.AvailSample
 
@@ -19,11 +20,12 @@ import com.servermon.monitor.data.AvailSample
 fun UptimeBar(
     samples: List<AvailSample>,
     modifier: Modifier = Modifier,
+    barHeight: Dp = 28.dp,
 ) {
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(28.dp)
+            .height(barHeight)
     ) {
         if (samples.isEmpty()) return@Canvas
         val slot = size.width / samples.size

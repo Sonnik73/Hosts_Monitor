@@ -66,6 +66,7 @@ fun DashboardScreen(
         refreshing = true
         repo.pollAll()
         refreshing = false
+        com.servermon.monitor.widget.WidgetUpdater.updateAll(context)
     }
 
     Scaffold(
@@ -85,6 +86,7 @@ fun DashboardScreen(
                             scope.launch {
                                 repo.pollAll()
                                 refreshing = false
+                                com.servermon.monitor.widget.WidgetUpdater.updateAll(context)
                             }
                         }
                     ) {
@@ -132,7 +134,13 @@ fun DashboardScreen(
                     }
                 }
                 items(servers, key = { it.id }) { server ->
-                    ServerCard(states[server.id], states, settings, onClick = { onOpenServer(server.id) })
+                    ServerCard(
+                        state = states[server.id],
+                        states = states,
+                        settings = settings,
+                        uptime = repo.uptimeOf(server.id),
+                        onClick = { onOpenServer(server.id) },
+                    )
                 }
             }
         }
@@ -144,6 +152,7 @@ private fun ServerCard(
     state: ServerState?,
     states: Map<String, ServerState>,
     settings: AppSettings,
+    uptime: List<com.servermon.monitor.data.AvailSample>,
     onClick: () -> Unit,
 ) {
     val server = state?.config ?: return
@@ -245,6 +254,11 @@ private fun ServerCard(
                     crit = settings.diskCritPct,
                     detail = worstDisk?.let { "${it.mount}: ${it.usedGb}/${it.totalGb} ГБ" } ?: "—",
                 )
+            }
+
+            if (uptime.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                com.servermon.monitor.ui.components.UptimeBar(uptime, barHeight = 10.dp)
             }
         }
     }
