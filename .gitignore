@@ -16,3 +16,6 @@ Thumbs.db
 # Secrets / real agent config (never commit the real one)
 agent/config.json
 *.keystore
+
+# ZCode session files
+.zcode/
