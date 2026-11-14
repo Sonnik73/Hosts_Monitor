@@ -55,6 +55,11 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
     val settingsStore = remember { SettingsStore(context) }
     val settings by settingsStore.settings.collectAsStateWithLifecycle(initialValue = AppSettings())
     val servers by repo.servers.collectAsStateWithLifecycle()
+    val appVersion = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "?"
+    }
 
     var showServerDialog by remember { mutableStateOf(false) }
     var editingServer by remember { mutableStateOf<ServerConfig?>(null) }
@@ -83,6 +88,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item {
+                Text(
+                    "Hosts Monitor v$appVersion",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {

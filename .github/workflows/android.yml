@@ -44,13 +44,14 @@ jobs:
 
       # Releases are used instead of artifacts: release assets don't count
       # toward the Actions storage quota on private repos.
-      - name: Upload APK to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk
-          name: APK builds
-          body: "Свежая debug-сборка приложения (обновляется при каждом пуше в main)"
-          files: app/build/outputs/apk/debug/*.apk
-          make_latest: true
+      - name: Publish APK to Release (versioned name)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/debug/app-debug.apk "hosts-monitor-v${VERSION}.apk"
+          gh release create apk --title "APK builds" --notes "Свежая debug-сборка (обновляется при каждом пуше в main). Версия приложения: v${VERSION}" 2>/dev/null || true
+          for a in $(gh release view apk --json assets --jq '.assets[].name' 2>/dev/null); do
+            gh release delete-asset apk "$a" -y
+          done
+          gh release upload apk "hosts-monitor-v${VERSION}.apk" --clobber
