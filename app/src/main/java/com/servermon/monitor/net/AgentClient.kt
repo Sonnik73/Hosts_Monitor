@@ -35,6 +35,11 @@ object AgentClient {
 
     /** Blocking call — invoke from a worker thread. */
     fun fetch(baseUrl: String, token: String): Metrics {
+        if (token.isBlank()) {
+            throw IllegalStateException(
+                "токен не задан — задайте его в настройках сервера или через генератор агента"
+            )
+        }
         val url = baseUrl.trimEnd('/') + "/metrics.json"
         val request = Request.Builder()
             .url(url)

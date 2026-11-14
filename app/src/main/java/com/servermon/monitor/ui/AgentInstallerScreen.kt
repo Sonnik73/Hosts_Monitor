@@ -70,6 +70,7 @@ fun AgentInstallerScreen(
     }
     var script by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var applyMessage by remember { mutableStateOf<String?>(null) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-shellscript")
@@ -163,6 +164,22 @@ fun AgentInstallerScreen(
                     }
                 },
             )
+            OutlinedButton(
+                onClick = {
+                    if (token.isBlank()) {
+                        error = "Токен пустой"
+                    } else {
+                        repo.servers.value.forEach { repo.updateServer(it.copy(token = token)) }
+                        applyMessage = "Токен применён ко всем ${repo.servers.value.size} серверам"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Применить этот токен ко всем серверам")
+            }
+            applyMessage?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
             OutlinedTextField(
                 value = mountsText,
                 onValueChange = { mountsText = it },

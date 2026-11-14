@@ -287,8 +287,17 @@ private fun ServerDialog(
                 )
                 OutlinedTextField(
                     value = token, onValueChange = { token = it },
-                    label = { Text("Токен из config.json агента") }, singleLine = true,
+                    label = { Text("Токен (можно оставить пустым — задать позже)") },
+                    singleLine = true,
                 )
+                if (initial == null) {
+                    Text(
+                        "Токен общий для всех серверов — он появится в генераторе агента, " +
+                            "и его можно будет применить ко всем серверам одной кнопкой.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
         confirmButton = {
