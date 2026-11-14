@@ -22,9 +22,11 @@
   ],
   "network": {"rx_bps": 184320, "tx_bps": 52440, "established": 63},
   "services": {"nginx": "active", "matrix-synapse": "active", "wireguard": "inactive"},
+  "watched_processes": {"nginx": 4, "python3": 1, "synapse": 0},
   "peers": [
-    {"name": "vpn", "ok": true, "latency_ms": 8.4, "error": null},
-    {"name": "relay", "ok": false, "latency_ms": null, "error": "Connection refused"}
+    {"name": "vpn", "ok": true, "latency_ms": 8.4, "error": null,
+     "state": {"hostname": "vpn-host", "uptime_sec": 987654, "cpu_pct": 12.5, "mem_pct": 44.1}},
+    {"name": "relay", "ok": false, "latency_ms": null, "error": "Connection refused", "state": null}
   ],
   "top_processes": [
     {"cpu_pct": 12.3, "mem_pct": 8.7, "name": "python3"},

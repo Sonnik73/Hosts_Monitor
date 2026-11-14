@@ -58,11 +58,23 @@ class AgentJsonParsingTest {
         assertTrue(okPeer.ok)
         assertEquals(8.4, okPeer.latencyMs!!, 0.001)
         assertNull(okPeer.error)
+        // relayed summary state
+        assertEquals("vpn-host", okPeer.state!!.hostname)
+        assertEquals(987654L, okPeer.state!!.uptimeSec)
+        assertEquals(12.5, okPeer.state!!.cpuPct, 0.001)
 
         val badPeer = m.peers.first { it.name == "relay" }
         assertFalse(badPeer.ok)
         assertNull(badPeer.latencyMs)
         assertEquals("Connection refused", badPeer.error)
+        assertNull(badPeer.state)
+    }
+
+    @Test
+    fun `parses watched process counts`() {
+        val m = json.decodeFromString(Metrics.serializer(), loadFixture())
+        assertEquals(4, m.watchedProcesses["nginx"])
+        assertEquals(0, m.watchedProcesses["synapse"])
     }
 
     @Test

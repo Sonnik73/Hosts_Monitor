@@ -29,6 +29,7 @@ data class Metrics(
     val disks: List<DiskInfo> = emptyList(),
     val network: NetworkInfo = NetworkInfo(),
     val services: Map<String, String> = emptyMap(),
+    @SerialName("watched_processes") val watchedProcesses: Map<String, Int> = emptyMap(),
     val peers: List<PeerCheck> = emptyList(),
     @SerialName("top_processes") val topProcesses: List<ProcessInfo> = emptyList(),
     @SerialName("failed_ssh_logins_24h") val failedSshLogins24h: Int? = null,
@@ -97,6 +98,39 @@ data class PeerCheck(
     val ok: Boolean = false,
     @SerialName("latency_ms") val latencyMs: Double? = null,
     val error: String? = null,
+    /** Relayed summary of the peer, present when the agent could fetch it over HTTP. */
+    val state: PeerState? = null,
+)
+
+@Serializable
+data class PeerState(
+    val hostname: String = "",
+    @SerialName("uptime_sec") val uptimeSec: Long = 0,
+    @SerialName("cpu_pct") val cpuPct: Double = 0.0,
+    @SerialName("mem_pct") val memPct: Double = 0.0,
+)
+
+/** Payload of GET /discovery.json — what the user can pick to watch. */
+@Serializable
+data class Discovery(
+    val hostname: String = "",
+    val ips: List<String> = emptyList(),
+    val services: List<ServiceUnit> = emptyList(),
+    val processes: List<ProcStat> = emptyList(),
+)
+
+@Serializable
+data class ServiceUnit(
+    val unit: String = "",
+    val active: Boolean = false,
+)
+
+@Serializable
+data class ProcStat(
+    val name: String = "",
+    val count: Int = 0,
+    @SerialName("cpu_pct") val cpuPct: Double = 0.0,
+    @SerialName("mem_pct") val memPct: Double = 0.0,
 )
 
 @Serializable
@@ -117,6 +151,10 @@ data class ServerConfig(
     /** Agent base URL, e.g. http://10.0.0.10:8443 or https://matrix.example.com/agent */
     val baseUrl: String,
     val token: String,
+    /** Services the user picked to watch (pushed to the agent's watch.json). */
+    val watchedServices: List<String> = emptyList(),
+    /** Process names the user picked to watch. */
+    val watchedProcesses: List<String> = emptyList(),
 )
 
 /** One poll result for a server, kept in the repository's state flow. */

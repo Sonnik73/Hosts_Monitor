@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """ServerMon agent — lightweight metrics endpoint for the hosts-monitor Android app.
 
-Serves GET /metrics.json (JSON) protected by a token header (X-Auth-Token).
-Python 3 stdlib only, no dependencies. Runs as a systemd service (see install.sh).
+Serves GET /metrics.json, /discovery.json, /health and POST /watch,
+protected by a token header (X-Auth-Token). Python 3 stdlib only.
+
+All servers can share ONE config: peers list may contain every server
+(including this one — self entries are detected and skipped).
 
 Usage:
     python3 agent.py                          # config /etc/servermon/config.json
@@ -14,16 +17,19 @@ import argparse
 import glob
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_CONFIG_PATH = "/etc/servermon/config.json"
 SAMPLE_INTERVAL = 5  # seconds between background CPU/net samples
+CONFIG_PATH = DEFAULT_CONFIG_PATH  # real path set in main()/selftest
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +55,7 @@ def get_uptime_seconds():
             return round(float(line.split()[0]))
         except ValueError:
             pass
-    # Fallback for non-Linux (dev machines): process start isn't boot, but a sane monotonic marker
+    # Fallback for non-Linux (dev machines)
     return round(time.monotonic())
 
 
@@ -88,14 +94,13 @@ def get_memory():
     used = total - available
     swap_total = info.get("SwapTotal", 0)
     swap_free = info.get("SwapFree", 0)
-    result = {
+    return {
         "total_mb": round(total / 1024),
         "used_mb": round(used / 1024),
         "used_pct": round(used * 100.0 / total, 1) if total else 0.0,
         "swap_total_mb": round(swap_total / 1024),
         "swap_used_mb": round((swap_total - swap_free) / 1024),
     }
-    return result
 
 
 def get_disk(mount):
@@ -131,8 +136,8 @@ def _proc_stat_cpu():
     line = _read_first_line("/proc/stat")
     if not line.startswith("cpu"):
         return None
-    fields = [int(x) for x in line.split()[1:9]]  # user nice system idle iowait irq softirq steal
-    idle = fields[3] + fields[4]  # idle + iowait
+    fields = [int(x) for x in line.split()[1:9]]
+    idle = fields[3] + fields[4]
     total = sum(fields)
     return idle, total
 
@@ -163,7 +168,7 @@ def get_established_connections():
     return count
 
 
-def get_top_processes(limit=5):
+def get_top_processes(limit=15):
     """Top processes by CPU via ps; returns list of dicts."""
     try:
         out = subprocess.run(
@@ -198,37 +203,193 @@ def get_failed_ssh_logins(since="-24h"):
 
 
 # ---------------------------------------------------------------------------
-# Service status and peer connectivity checks
+# Watch lists (services/processes the app asked to monitor) — watch.json
+# next to config.json, updated via POST /watch from the app
 # ---------------------------------------------------------------------------
 
+def _watch_path():
+    return os.path.join(os.path.dirname(CONFIG_PATH) or ".", "watch.json")
+
+
+def load_watch():
+    try:
+        with open(_watch_path(), "r", encoding="utf-8") as f:
+            w = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return w if isinstance(w, dict) else {}
+
+
+def save_watch(watch):
+    path = _watch_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(watch, f)
+    os.replace(tmp, path)
+
+
+def get_watch_lists(config):
+    """Effective watch lists: watch.json (app-pushed) overrides config defaults."""
+    merged = dict(config.get("watch") or {})
+    merged.update({k: v for k, v in load_watch().items() if v})
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Service / process discovery
+# ---------------------------------------------------------------------------
+
+def get_own_ips():
+    ips = {"127.0.0.1", "::1", "localhost"}
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=3).stdout.split()
+        ips.update(out)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    return ips
+
+
+def list_enabled_services(limit=100):
+    """Unit names of enabled services — things that *should* be running."""
+    try:
+        out = subprocess.run(
+            ["systemctl", "list-unit-files", "--type=service", "--state=enabled",
+             "--no-legend", "--no-pager"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    names = []
+    for line in out.splitlines():
+        if line.strip():
+            names.append(line.split()[0])
+    return names[:limit]
+
+
 def get_service_status(services):
+    """systemctl is-active for a list; batched into few subprocess calls."""
     states = {}
-    for svc in services:
+    services = list(services)
+    for i in range(0, len(services), 40):
+        chunk = services[i:i + 40]
         try:
             r = subprocess.run(
-                ["systemctl", "is-active", svc],
-                capture_output=True, text=True, timeout=5,
+                ["systemctl", "is-active"] + chunk,
+                capture_output=True, text=True, timeout=8,
             )
-            states[svc] = r.stdout.strip() or "unknown"
+            lines = r.stdout.split()
+            for svc, st in zip(chunk, lines):
+                states[svc] = st or "unknown"
+            for svc in chunk[len(lines):]:
+                states[svc] = "unknown"
         except (OSError, subprocess.SubprocessError):
-            states[svc] = "unknown"
+            for svc in chunk:
+                states[svc] = "unknown"
     return states
 
 
-def check_peer(peer):
-    """TCP-connect check to a peer; returns reachability + latency in ms."""
+def get_discovery():
+    """Everything the app needs to let the user pick what to watch."""
+    enabled = list_enabled_services()
+    statuses = get_service_status(enabled)
+    services = [{"unit": name, "active": statuses.get(name) == "active"} for name in enabled]
+
+    agg = {}
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pcpu=,pmem=,comm=", "--no-headers"],
+            capture_output=True, text=True, timeout=8,
+        ).stdout
+        for line in out.splitlines():
+            parts = line.strip().split(None, 2)
+            if len(parts) != 3:
+                continue
+            try:
+                cpu, mem = float(parts[0]), float(parts[1])
+            except ValueError:
+                continue
+            comm = parts[2]
+            entry = agg.setdefault(comm, {"name": comm, "count": 0, "cpu_pct": 0.0, "mem_pct": 0.0})
+            entry["count"] += 1
+            entry["cpu_pct"] += cpu
+            entry["mem_pct"] += mem
+    except (OSError, subprocess.SubprocessError):
+        pass
+    processes = sorted(agg.values(), key=lambda e: -e["cpu_pct"])[:100]
+    for e in processes:
+        e["cpu_pct"] = round(e["cpu_pct"], 1)
+        e["mem_pct"] = round(e["mem_pct"], 1)
+
+    return {
+        "hostname": get_hostname(),
+        "ips": sorted(ip for ip in get_own_ips() if not ip.startswith("127.") and ip != "localhost"),
+        "services": services,
+        "processes": processes,
+    }
+
+
+def get_watched_processes(names):
+    """Map name -> running count for the watched process names (pgrep -x)."""
+    result = {}
+    for n in names:
+        try:
+            r = subprocess.run(["pgrep", "-cx", "--", n], capture_output=True, text=True, timeout=5)
+            result[n] = int(r.stdout.strip() or 0)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            result[n] = -1  # unknown (pgrep missing)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Peer connectivity + relayed state
+# ---------------------------------------------------------------------------
+
+def _fetch_peer_summary(host, port, token):
+    """Fetch a peer's /metrics.json and extract a small summary (no recursion)."""
+    url = "http://%s:%s/metrics.json" % (host, port)
+    req = urllib.request.Request(url, headers={"X-Auth-Token": token or ""})
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+    mem = data.get("memory") or {}
+    return {
+        "hostname": data.get("hostname", ""),
+        "uptime_sec": data.get("uptime_sec", 0),
+        "cpu_pct": (data.get("cpu") or {}).get("usage_pct", 0.0),
+        "mem_pct": mem.get("used_pct", 0.0),
+    }
+
+
+def check_peer(peer, own_ips, own_hostname, token):
+    """TCP-connect check to a peer; if reachable, also relay its summary state."""
     host = peer.get("host", "")
     port = peer.get("port")
     name = peer.get("name", host)
     if not host or not port:
-        return {"name": name, "ok": False, "latency_ms": None, "error": "bad peer config"}
+        return {"name": name, "ok": False, "latency_ms": None, "error": "bad peer config", "state": None}
+    if host in own_ips or name == own_hostname:
+        return {"name": name, "ok": None, "latency_ms": None, "error": "self", "state": None}
+
     start = time.monotonic()
     try:
         with socket.create_connection((host, int(port)), timeout=3.0):
             latency = (time.monotonic() - start) * 1000.0
-            return {"name": name, "ok": True, "latency_ms": round(latency, 1), "error": None}
     except OSError as exc:
-        return {"name": name, "ok": False, "latency_ms": None, "error": str(exc) or exc.__class__.__name__}
+        return {"name": name, "ok": False, "latency_ms": None,
+                "error": str(exc) or exc.__class__.__name__, "state": None}
+
+    result = {"name": name, "ok": True, "latency_ms": round(latency, 1), "error": None, "state": None}
+    result["state"] = _fetch_peer_summary(host, port, token)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -259,15 +420,15 @@ class Sampler:
                 pass  # never crash the sampler thread
 
     def _sample(self):
-        prev_idle, prev_total = _proc_stat_cpu() or (0, 1)
+        prev = _proc_stat_cpu() or (0, 1)
         prev_rx, prev_tx = _net_counters()
         time.sleep(1.0)
         cur = _proc_stat_cpu()
         rx, tx = _net_counters()
         with self.lock:
             if cur:
-                idle_d = cur[0] - prev_idle
-                total_d = cur[1] - prev_total
+                idle_d = cur[0] - prev[0]
+                total_d = cur[1] - prev[1]
                 if total_d > 0:
                     self.cpu_pct = round(100.0 * (1.0 - idle_d / total_d), 1)
                     self.cpu_pct = max(0.0, min(100.0, self.cpu_pct))
@@ -281,15 +442,38 @@ class Sampler:
 
 def collect_metrics(config, sampler):
     memory = get_memory()
-    services = get_service_status(config.get("services", []))
-    peers = [check_peer(p) for p in config.get("peers", [])]
+    watch = get_watch_lists(config)
+
+    # Watched services if the app selected them; otherwise enabled services
+    # (enabled-but-inactive is already an anomaly worth seeing).
+    svc_names = watch.get("services") or []
+    if not isinstance(svc_names, list):
+        svc_names = []
+    if not svc_names:
+        svc_names = list_enabled_services(60)
+    services = get_service_status([s for s in svc_names if isinstance(s, str)])
+
+    proc_names = watch.get("processes") or []
+    if not isinstance(proc_names, list):
+        proc_names = []
+    watched_processes = get_watched_processes([p for p in proc_names if isinstance(p, str)])
+
+    peers_cfg = [p for p in config.get("peers", []) if isinstance(p, dict)]
+    own_ips = get_own_ips()
+    own_hostname = get_hostname()
+    token = (config.get("token") or "").strip()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        peers = list(ex.map(lambda p: check_peer(p, own_ips, own_hostname, token), peers_cfg))
+    # drop self-entries from the report — the app knows who is who
+    peers = [p for p in peers if p.get("ok") is not None]
+
     with sampler.lock:
         cpu_pct = sampler.cpu_pct
         rx_bps, tx_bps = sampler.net_rx_bps, sampler.net_tx_bps
     return {
-        "agent_version": 1,
+        "agent_version": 2,
         "timestamp": int(time.time()),
-        "hostname": get_hostname(),
+        "hostname": own_hostname,
         "uptime_sec": get_uptime_seconds(),
         "cpu": {
             "cores": get_cpu_count(),
@@ -305,8 +489,9 @@ def collect_metrics(config, sampler):
             "established": get_established_connections(),
         },
         "services": services,
+        "watched_processes": watched_processes,
         "peers": peers,
-        "top_processes": get_top_processes(config.get("top_processes_limit", 5)),
+        "top_processes": get_top_processes(15),
         "failed_ssh_logins_24h": get_failed_ssh_logins(),
     }
 
@@ -319,9 +504,13 @@ class MetricsHandler(BaseHTTPRequestHandler):
     config = {}
     sampler = None
 
+    def _authorized(self):
+        token = (self.config.get("token") or "").strip()
+        return token and self.headers.get("X-Auth-Token") == token
+
     def do_GET(self):  # noqa: N802 (stdlib API)
         path = self.path.split("?")[0]
-        if path not in ("/metrics.json", "/health"):
+        if path not in ("/metrics.json", "/discovery.json", "/health"):
             self._send(404, {"error": "not found"})
             return
 
@@ -330,16 +519,37 @@ class MetricsHandler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "hostname": get_hostname()})
             return
 
-        token = (self.config.get("token") or "").strip()
-        if token and self.headers.get("X-Auth-Token") != token:
+        if not self._authorized():
             self._send(403, {"error": "invalid token"})
             return
 
         try:
-            metrics = collect_metrics(self.config, self.sampler)
-            self._send(200, metrics)
+            if path == "/discovery.json":
+                self._send(200, get_discovery())
+            else:
+                self._send(200, collect_metrics(self.config, self.sampler))
         except Exception as exc:  # last-resort guard: always answer JSON
-            self._send(500, {"error": "metrics collection failed: %s" % exc})
+            self._send(500, {"error": "collection failed: %s" % exc})
+
+    def do_POST(self):  # noqa: N802 (stdlib API)
+        if self.path.split("?")[0] != "/watch":
+            self._send(404, {"error": "not found"})
+            return
+        if not self._authorized():
+            self._send(403, {"error": "invalid token"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+            watch = {
+                "services": [str(s) for s in (data.get("services") or [])][:100],
+                "processes": [str(s) for s in (data.get("processes") or [])][:100],
+                "mounts": [str(s) for s in (data.get("mounts") or [])][:20],
+            }
+            save_watch(watch)
+            self._send(200, {"ok": True})
+        except (ValueError, OSError) as exc:
+            self._send(400, {"error": "bad request: %s" % exc})
 
     def _send(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -349,7 +559,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, fmt, *args):  # quiet: only errors reach stderr via log_error
+    def log_message(self, fmt, *args):  # quiet: only errors reach stderr
         if args and ("403" in str(args[1]) or "500" in str(args[1])):
             sys.stderr.write("[agent] %s - %s\n" % (self.address_string(), fmt % args))
 
@@ -359,6 +569,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def load_config(path):
+    global CONFIG_PATH
     try:
         with open(path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -368,6 +579,7 @@ def load_config(path):
         sys.exit("[agent] invalid config JSON in %s: %s" % (path, exc))
     if not cfg.get("token"):
         sys.exit("[agent] 'token' must be set in config (see config.example.json)")
+    CONFIG_PATH = os.path.abspath(path)
     return cfg
 
 
@@ -413,7 +625,7 @@ def main():
     host = cfg.get("listen_host", "0.0.0.0")
     port = int(cfg.get("listen_port", 8443))
     server = ThreadingHTTPServer((host, port), MetricsHandler)
-    print("[agent] serving /metrics.json on %s:%d" % (host, port), flush=True)
+    print("[agent] serving on %s:%d (metrics, discovery, watch)" % (host, port), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

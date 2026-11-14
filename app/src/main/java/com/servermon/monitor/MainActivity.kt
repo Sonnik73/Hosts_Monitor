@@ -55,7 +55,15 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("server/{id}") { backStack ->
                         val id = backStack.arguments?.getString("id") ?: ""
-                        ServerDetailScreen(serverId = id, onBack = { nav.popBackStack() })
+                        ServerDetailScreen(
+                            serverId = id,
+                            onBack = { nav.popBackStack() },
+                            onOpenWatch = { nav.navigate("watch/$id") },
+                        )
+                    }
+                    composable("watch/{id}") { backStack ->
+                        val id = backStack.arguments?.getString("id") ?: ""
+                        WatchSelectScreen(serverId = id, onBack = { nav.popBackStack() })
                     }
                     composable("connectivity") {
                         ConnectivityScreen(onBack = { nav.popBackStack() })

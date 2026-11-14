@@ -55,13 +55,16 @@ fun AgentInstallerScreen(
     var name by remember { mutableStateOf("") }
     var listenPort by remember { mutableStateOf("8443") }
     var token by remember { mutableStateOf(InstallerGenerator.randomToken()) }
-    var servicesText by remember { mutableStateOf("nginx, ssh") }
     var mountsText by remember { mutableStateOf("/, /var") }
     var appUrl by remember { mutableStateOf("") }
     var peersText by remember {
+        // One script for ALL servers: peers = every server already added to the app.
         val initial = repo.servers.value.joinToString("\n") { s ->
-            val host = runCatching { java.net.URI(s.baseUrl).host }.getOrNull() ?: ""
-            "${s.name}, ${host}:8443"
+            val (host, port) = runCatching {
+                val uri = java.net.URI(s.baseUrl)
+                (uri.host ?: "") to (if (uri.port > 0) uri.port else 8443)
+            }.getOrDefault("" to 8443)
+            "${s.name}, ${host}:${port}"
         }
         mutableStateOf(initial)
     }
@@ -80,12 +83,6 @@ fun AgentInstallerScreen(
     }
 
     fun parseSpec(): AgentSpec? {
-        val n = name.trim()
-        if (n.isBlank()) {
-            error = "Введите имя сервера (например: matrix)"
-            return null
-        }
-        val services = servicesText.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
         val mounts = mountsText.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
         val peers = peersText.lines().mapNotNull { line ->
             val parts = line.split(',', limit = 2)
@@ -97,11 +94,13 @@ fun AgentInstallerScreen(
             PeerSpec(peerName, hostPort.substring(0, idx), hostPort.substring(idx + 1).toIntOrNull() ?: 8443)
         }
         error = null
+        // Services are left empty: the agent auto-reports enabled services,
+        // and the user picks what to watch from the app after installation.
         return AgentSpec(
             listenPort = listenPort.toIntOrNull() ?: 8443,
             token = token,
             mounts = mounts,
-            services = services,
+            services = emptyList(),
             peers = peers,
         )
     }
@@ -138,19 +137,13 @@ fun AgentInstallerScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                "Скрипт-установщик в один файл: агент зашит внутрь вместе с вашим конфигом. " +
-                    "Отправьте его на сервер через Termius и запустите.",
+                "Один скрипт на ВСЕ сервера: агент зашит внутрь вместе с общим токеном и списком " +
+                    "всех узлов (каждый агент сам узнаёт себя и не проверяет сам себя). " +
+                    "Списки сервисов/процессов агент отдаёт сам — выберете что смотреть в приложении.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Имя сервера (matrix, vpn, relay…)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
             OutlinedTextField(
                 value = listenPort,
                 onValueChange = { listenPort = it.filter(Char::isDigit) },
@@ -161,7 +154,7 @@ fun AgentInstallerScreen(
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it.trim() },
-                label = { Text("Токен (уже вписан в скрипт)") },
+                label = { Text("Токен (общий для всех серверов)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 trailingIcon = {
@@ -169,12 +162,6 @@ fun AgentInstallerScreen(
                         Icon(Icons.Filled.Refresh, contentDescription = "Новый токен")
                     }
                 },
-            )
-            OutlinedTextField(
-                value = servicesText,
-                onValueChange = { servicesText = it },
-                label = { Text("Сервисы для мониторинга (через запятую)") },
-                modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = mountsText,
@@ -188,7 +175,7 @@ fun AgentInstallerScreen(
                 label = { Text("Пиры (по одному в строке: имя, host:port)") },
                 modifier = Modifier.fillMaxWidth(),
                 supportingText = {
-                    Text("Имя пира = имя сервера в приложении. Предзаполнено из ваших серверов.")
+                    Text("Предзаполнено из всех добавленных серверов — имя должно совпадать с именем в приложении.")
                 },
                 minLines = 2,
             )
@@ -201,7 +188,7 @@ fun AgentInstallerScreen(
                 onClick = { script = parseSpec()?.let { InstallerGenerator.buildScript(context, it) } },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Сгенерировать скрипт")
+                Text("Сгенерировать скрипт (один на все сервера)")
             }
 
             if (script != null) {
@@ -210,8 +197,9 @@ fun AgentInstallerScreen(
                         Text("Как поставить через Termius:", style = MaterialTheme.typography.titleSmall)
                         Text(
                             "1. «Поделиться» → Termius (станет сниппетом) — или «Сохранить файл» и залейте по SFTP в /root.\n" +
-                                "2. В терминале сервера:  sudo bash servermon-install.sh\n" +
-                                "3. Нажмите «Добавить в приложение» с адресом агента и тем же токеном.",
+                                "2. Один и тот же файл — на каждый сервер:  sudo bash servermon-install.sh\n" +
+                                "3. В приложении: детали сервера → ⚙︎ «Отслеживание» — выбрать сервисы и процессы галочками.\n" +
+                                "4. Если сервер недоступен с телефона напрямую, но виден с другого — дашборд покажет его состояние «через» соседа.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -238,7 +226,12 @@ fun AgentInstallerScreen(
                     OutlinedButton(
                         onClick = {
                             val url = appUrl.trim()
-                            if (url.startsWith("http")) onAddServer(name.trim(), url, token.trim())
+                            val n = name.trim()
+                            if (url.startsWith("http") && n.isNotEmpty()) {
+                                onAddServer(n, url, token.trim())
+                            } else {
+                                error = "Для добавления нужны имя и URL"
+                            }
                         },
                         enabled = appUrl.trim().startsWith("http"),
                         modifier = Modifier.weight(1f),
@@ -248,9 +241,16 @@ fun AgentInstallerScreen(
                 }
 
                 OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Имя нового сервера (для добавления)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
                     value = appUrl,
                     onValueChange = { appUrl = it },
-                    label = { Text("URL агента для приложения") },
+                    label = { Text("URL агента нового сервера") },
                     placeholder = { Text("http://10.0.0.10:8443") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,

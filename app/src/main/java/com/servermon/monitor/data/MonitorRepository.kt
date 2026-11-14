@@ -68,6 +68,22 @@ class MonitorRepository private constructor(context: Context) {
         }
     }
 
+    /** Persist the watch selection for a server (UI state). Push to agent separately. */
+    fun updateWatch(server: ServerConfig, services: List<String>, processes: List<String>) {
+        updateServer(server.copy(watchedServices = services, watchedProcesses = processes))
+    }
+
+    /** Blocking POST /watch to the agent — call from IO. */
+    suspend fun pushWatchTo(server: ServerConfig) = withContext(Dispatchers.IO) {
+        AgentClient.pushWatch(
+            baseUrl = server.baseUrl,
+            token = server.token,
+            services = server.watchedServices,
+            processes = server.watchedProcesses,
+            mounts = emptyList(),
+        )
+    }
+
     /** Poll every configured server in parallel; returns the number of online servers. */
     suspend fun pollAll(): Int {
         val targets = _servers.value

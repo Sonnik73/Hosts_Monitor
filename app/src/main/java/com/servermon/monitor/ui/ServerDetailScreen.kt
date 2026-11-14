@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -49,6 +50,7 @@ import kotlinx.coroutines.launch
 fun ServerDetailScreen(
     serverId: String,
     onBack: () -> Unit,
+    onOpenWatch: () -> Unit = {},
 ) {
     val repo = MonitorRepository.get()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -72,6 +74,9 @@ fun ServerDetailScreen(
                 },
                 actions = {
                     if (server != null) {
+                        IconButton(onClick = onOpenWatch) {
+                            Icon(Icons.Filled.Tune, contentDescription = "Настроить отслеживание")
+                        }
                         IconButton(onClick = { scope.launch { repo.pollOne(server) } }) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Обновить")
                         }
@@ -286,6 +291,28 @@ private fun DetailContent(
                     KeyValue(
                         p.name,
                         "CPU %.1f%% · MEM %.1f%%".format(p.cpuPct, p.memPct),
+                    )
+                }
+            }
+        }
+
+        item {
+            Section("Отслеживаемые процессы") {
+                if (m.watchedProcesses.isEmpty()) {
+                    Text(
+                        "Не выбраны. Иконка ⚙︎ сверху — выбрать сервисы и процессы.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                for ((name, count) in m.watchedProcesses) {
+                    KeyValue(
+                        name,
+                        when {
+                            count < 0 -> "неизвестно"
+                            count == 0 -> "НЕ ЗАПУЩЕН"
+                            else -> "запущен ×$count"
+                        },
                     )
                 }
             }

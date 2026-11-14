@@ -58,8 +58,8 @@ fun severityColor(sev: Int): Color = when (sev) {
 // ---------------------------------------------------------------------------
 
 @Composable
-fun StatusDot(online: Boolean, size: Dp = 12.dp) {
-    val color = if (online) severityColor(0) else severityColor(2)
+fun StatusDot(online: Boolean, size: Dp = 12.dp, colorOverride: Color? = null) {
+    val color = colorOverride ?: if (online) severityColor(0) else severityColor(2)
     androidx.compose.foundation.layout.Box(
         modifier = Modifier
             .size(size)

@@ -43,6 +43,7 @@ import com.servermon.monitor.data.SettingsStore
 import com.servermon.monitor.ui.components.MetricBar
 import com.servermon.monitor.ui.components.StatusDot
 import com.servermon.monitor.ui.components.formatUptime
+import com.servermon.monitor.ui.components.severityColor
 import com.servermon.monitor.ui.theme.HostsMonitorTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -131,7 +132,7 @@ fun DashboardScreen(
                     }
                 }
                 items(servers, key = { it.id }) { server ->
-                    ServerCard(states[server.id], settings, onClick = { onOpenServer(server.id) })
+                    ServerCard(states[server.id], states, settings, onClick = { onOpenServer(server.id) })
                 }
             }
         }
@@ -139,9 +140,26 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun ServerCard(state: ServerState?, settings: AppSettings, onClick: () -> Unit) {
+private fun ServerCard(
+    state: ServerState?,
+    states: Map<String, ServerState>,
+    settings: AppSettings,
+    onClick: () -> Unit,
+) {
     val server = state?.config ?: return
     val m = state.metrics
+
+    // Relay view: direct poll failed, but a peer agent sees this server alive
+    val relay = if (!state.online) {
+        states.values.firstOrNull { o ->
+            o.online && o.config.id != server.id &&
+                o.metrics?.peers?.any { it.name == server.name && it.ok } == true
+        }?.let { o ->
+            o.config.name to o.metrics!!.peers.first { it.name == server.name }
+        }
+    } else null
+    val viaRelay = relay != null && relay.second.ok
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -154,12 +172,16 @@ private fun ServerCard(state: ServerState?, settings: AppSettings, onClick: () -
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(online = state.online)
+                    StatusDot(online = state.online, colorOverride = if (viaRelay) severityColor(1) else null)
                     Spacer(Modifier.padding(start = 8.dp))
                     Column {
                         Text(server.name, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            m?.hostname ?: state.error ?: "",
+                            when {
+                                m != null -> m.hostname
+                                viaRelay -> "через ${relay!!.first}"
+                                else -> state.error ?: ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -176,10 +198,27 @@ private fun ServerCard(state: ServerState?, settings: AppSettings, onClick: () -
 
             Spacer(Modifier.height(12.dp))
             if (m == null) {
+                if (viaRelay) {
+                    val st = relay!!.second.state
+                    Text(
+                        buildString {
+                            append("Доступен через ${relay.first}")
+                            if (st != null) {
+                                append("  •  ↑ ${formatUptime(st.uptimeSec)}")
+                                append("  •  CPU %.0f%%".format(st.cpuPct))
+                                append("  •  RAM %.0f%%".format(st.memPct))
+                            } else {
+                                append("  •  отвечает на ping")
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = severityColor(1),
+                    )
+                }
                 Text(
                     state.error ?: "Нет данных",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 MetricBar(

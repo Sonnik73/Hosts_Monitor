@@ -18,16 +18,29 @@ class PollWorker(appContext: Context, params: WorkerParameters) :
         val context = applicationContext
         return try {
             repo.pollAll()
-            for ((id, state) in repo.states.value) {
-                val badServices = state.metrics?.services
-                    ?.filterValues { it != "active" }
-                    ?.keys
-                    .orEmpty()
+            val states = repo.states.value
+            for ((id, state) in states) {
+                // Relay view: unreachable from the phone but alive from a peer agent
+                val relayOnline = !state.online && states.values.any { other ->
+                    other.online && other.config.id != id &&
+                        other.metrics?.peers?.any { it.name == state.config.name && it.ok } == true
+                }
+                val watched = state.config.watchedServices
+                val badServices = if (state.online) {
+                    state.metrics?.services
+                        ?.filter { (name, status) ->
+                            (watched.isEmpty() || name in watched) && status != "active"
+                        }
+                        ?.keys
+                        .orEmpty()
+                } else {
+                    emptySet()
+                }
                 AlertNotifier.onPollResult(
                     context = context,
                     serverId = id,
                     serverName = state.config.name,
-                    online = state.online,
+                    online = state.online || relayOnline,
                     badServices = badServices,
                 )
             }
