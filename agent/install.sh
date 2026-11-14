@@ -46,7 +46,9 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now servermon-agent.service
+systemctl enable servermon-agent.service
+# restart (not just start): the service may already be running an old build
+systemctl restart servermon-agent.service
 
 echo
 echo "Installed. Check status:"

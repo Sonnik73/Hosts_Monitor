@@ -105,7 +105,8 @@ object InstallerGenerator {
 
             echo "[4/4] Запускаю сервис..."
             systemctl daemon-reload
-            systemctl enable --now servermon-agent.service
+            systemctl enable servermon-agent.service
+            systemctl restart servermon-agent.service
 
             echo
             echo "=== Готово! Проверка: ==="
