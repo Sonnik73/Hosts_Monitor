@@ -100,6 +100,7 @@ fun ServerDetailScreen(
                 serverState = serverState,
                 settings = settings,
                 history = repo.historyOf(serverId),
+                uptime = repo.uptimeOf(serverId),
                 modifier = Modifier.padding(padding),
             )
             relay != null && relay.second.ok -> RelayCard(
@@ -202,6 +203,7 @@ private fun DetailContent(
     serverState: com.servermon.monitor.data.ServerState,
     settings: AppSettings,
     history: List<com.servermon.monitor.data.Sample>,
+    uptime: List<com.servermon.monitor.data.AvailSample>,
     modifier: Modifier = Modifier,
 ) {
     val m = serverState.metrics
@@ -228,6 +230,32 @@ private fun DetailContent(
                 KeyValue("Ядер CPU", m.cpu.cores.toString())
                 KeyValue("Соединений (ESTABLISHED)", m.network.established.toString())
                 m.cpu.tempC?.let { KeyValue("Температура CPU", "%.0f °C".format(it)) }
+            }
+        }
+
+        item {
+            Section("Доступность") {
+                if (uptime.isEmpty()) {
+                    Text(
+                        "История копится при каждом опросе (фон + ручные обновления). " +
+                            "Зелёный — в сети, жёлтый — виден через релей, красный — недоступен.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    com.servermon.monitor.ui.components.UptimeBar(uptime)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("раньше", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("сейчас", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val upCount = uptime.count { it.state == 1 || it.state == 2 }
+                    KeyValue("Опросов в сети", "$upCount из ${uptime.size}")
+                }
             }
         }
 

@@ -9,6 +9,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
@@ -21,6 +24,13 @@ import kotlin.concurrent.withLock
 class MonitorRepository private constructor(context: Context) {
 
     private val secureStore = SecureStore(context.applicationContext)
+    private val uptimeFile = java.io.File(context.applicationContext.filesDir, "uptime_history.json")
+    private val uptimeJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val uptime = java.util.concurrent.ConcurrentHashMap<String, ArrayDeque<AvailSample>>()
+
+    init {
+        loadUptime()
+    }
 
     private val _servers = MutableStateFlow(secureStore.loadServers())
     val servers: StateFlow<List<ServerConfig>> = _servers
@@ -38,6 +48,55 @@ class MonitorRepository private constructor(context: Context) {
 
     fun historyOf(id: String): List<Sample> =
         history[id]?.toList() ?: emptyList()
+
+    fun uptimeOf(id: String): List<AvailSample> =
+        uptime[id]?.toList() ?: emptyList()
+
+    /**
+     * Record availability for every server after a poll cycle.
+     * 0 = down, 1 = up, 2 = up via relay (phone can't reach it, a peer can).
+     */
+    suspend fun recordAvailability(states: Map<String, ServerState>) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        for ((id, state) in states) {
+            val relay = states.values.any { o ->
+                o.online && o.config.id != id &&
+                    o.metrics?.peers?.any { it.name == state.config.name && it.ok } == true
+            }
+            val st = when {
+                state.online -> 1
+                relay -> 2
+                else -> 0
+            }
+            val deque = uptime.getOrPut(id) { ArrayDeque() }
+            lock.withLock {
+                deque.addLast(AvailSample(now, st))
+                while (deque.size > UPTIME_LIMIT) deque.removeFirst()
+            }
+        }
+        saveUptime()
+    }
+
+    private fun saveUptime() {
+        runCatching {
+            val serializer = MapSerializer(String.serializer(), ListSerializer(AvailSample.serializer()))
+            val map = uptime.entries.associate { it.key to it.value.toList() }
+            uptimeFile.writeText(uptimeJson.encodeToString(serializer, map))
+        }
+    }
+
+    private fun loadUptime() {
+        runCatching {
+            val raw = uptimeFile.readText()
+            val serializer = MapSerializer(String.serializer(), ListSerializer(AvailSample.serializer()))
+            val map = uptimeJson.decodeFromString(serializer, raw)
+            for ((id, list) in map) {
+                val deque = ArrayDeque<AvailSample>()
+                list.takeLast(UPTIME_LIMIT).forEach { deque.addLast(it) }
+                uptime[id] = deque
+            }
+        }
+    }
 
     fun addServer(name: String, baseUrl: String, token: String) {
         lock.withLock {
@@ -98,6 +157,7 @@ class MonitorRepository private constructor(context: Context) {
             if (state.online) online++
         }
         _states.value = map
+        recordAvailability(map)
         return online
     }
 
@@ -134,6 +194,7 @@ class MonitorRepository private constructor(context: Context) {
 
     companion object {
         private const val HISTORY_LIMIT = 180 // 180 samples ≈ 3 h of data at 1-min refresh
+        private const val UPTIME_LIMIT = 720  // ≈ 7.5 days at the 15-min background interval
 
         @Volatile private var instance: MonitorRepository? = null
 

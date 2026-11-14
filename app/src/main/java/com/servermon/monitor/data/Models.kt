@@ -182,3 +182,7 @@ data class AlertState(
     val online: Boolean = true,
     val badServices: Set<String> = emptySet(),
 )
+
+/** Availability sample: state 0 = down, 1 = up, 2 = up (via relay). */
+@Serializable
+data class AvailSample(val t: Long, val state: Int)
