@@ -10,7 +10,7 @@ import com.servermon.monitor.MainActivity
 import com.servermon.monitor.R
 import com.servermon.monitor.data.MonitorRepository
 
-/** Renders the home-screen widget from the repository's latest poll results. */
+/** Renders the home-screen widget in the app's theme — same palette as Pin widgets. */
 object WidgetUpdater {
 
     private const val MAX_ROWS = 5
@@ -23,8 +23,14 @@ object WidgetUpdater {
         val repo = MonitorRepository.get()
         val servers = repo.servers.value
         val states = repo.states.value
+        val colors = WidgetColors.current(context)
 
         val views = RemoteViews(context.packageName, R.layout.widget_hosts)
+        // Прозрачность фона — как в Pin (95% по умолчанию).
+        views.setInt(R.id.widget_bg, "setImageAlpha", WidgetColors.BG_ALPHA)
+        views.setTextColor(R.id.widget_title, colors.accent)
+        views.setTextColor(R.id.widget_summary, colors.muted)
+        views.setTextColor(R.id.widget_refresh, colors.muted)
         views.setTextViewText(R.id.widget_title, "Hosts Monitor")
         views.setTextViewText(
             R.id.widget_summary,
@@ -45,20 +51,29 @@ object WidgetUpdater {
                 } -> 2
                 else -> 0
             }
+            val meta = when (status) {
+                1 -> "в сети"
+                2 -> "через релей"
+                else -> "недоступен"
+            }
+            val dotColor = when (status) {
+                1 -> colors.up
+                2 -> colors.relay
+                else -> colors.down
+            }
             val row = RemoteViews(context.packageName, R.layout.widget_row)
             row.setTextViewText(R.id.row_name, server.name)
-            row.setTextViewText(R.id.row_dot, when (status) {
-                1 -> "●"
-                2 -> "◐"
-                else -> "●"
-            })
-            row.setTextColor(R.id.row_dot, dotColor(status))
+            row.setTextColor(R.id.row_name, colors.text)
+            row.setTextViewText(R.id.row_meta, meta)
+            row.setTextColor(R.id.row_meta, colors.muted)
+            row.setTextViewText(R.id.row_dot, if (status == 2) "◐" else "●")
+            row.setTextColor(R.id.row_dot, dotColor)
             views.addView(R.id.widget_list, row)
         }
         if (servers.isEmpty()) {
             val row = RemoteViews(context.packageName, R.layout.widget_row)
             row.setTextViewText(R.id.row_name, "Добавьте серверы в приложении")
-            row.setTextColor(R.id.row_dot, 0xFF9AA5AD.toInt())
+            row.setTextColor(R.id.row_name, colors.muted)
             views.addView(R.id.widget_list, row)
         }
 
@@ -77,11 +92,5 @@ object WidgetUpdater {
         views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
 
         manager.updateAppWidget(ids, views)
-    }
-
-    private fun dotColor(status: Int): Int = when (status) {
-        1 -> 0xFF43A047.toInt() // green
-        2 -> 0xFFFFB300.toInt() // amber
-        else -> 0xFFE53935.toInt() // red
     }
 }
