@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.servermon.monitor.data.AppSettings
+import com.servermon.monitor.data.MonitorRepository
 import com.servermon.monitor.data.SettingsStore
 import com.servermon.monitor.ui.ConnectivityScreen
 import com.servermon.monitor.ui.DashboardScreen
@@ -60,7 +61,19 @@ class MainActivity : ComponentActivity() {
                         ConnectivityScreen(onBack = { nav.popBackStack() })
                     }
                     composable("settings") {
-                        SettingsScreen(onBack = { nav.popBackStack() })
+                        SettingsScreen(
+                            onBack = { nav.popBackStack() },
+                            onOpenInstaller = { nav.navigate("installer") },
+                        )
+                    }
+                    composable("installer") {
+                        com.servermon.monitor.ui.AgentInstallerScreen(
+                            onBack = { nav.popBackStack() },
+                            onAddServer = { name, url, token ->
+                                MonitorRepository.get().addServer(name, url, token)
+                                nav.popBackStack()
+                            },
+                        )
                     }
                 }
             }

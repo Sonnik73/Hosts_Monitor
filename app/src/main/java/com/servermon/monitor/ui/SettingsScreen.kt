@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenInstaller: () -> Unit = {}) {
     val repo = MonitorRepository.get()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -83,6 +83,23 @@ fun SettingsScreen(onBack: () -> Unit) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Установка агента", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Сгенерировать скрипт-установщик с токеном и отправить на сервер через Termius",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = onOpenInstaller) {
+                            Text("Генератор агента")
+                        }
+                    }
+                }
+            }
+
             item {
                 Text("Серверы", style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary)
