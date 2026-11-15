@@ -72,8 +72,16 @@ object UpdateChecker {
         }
     }
 
-    /** Blocking; downloads APK into cacheDir/updates. Returns the file. */
-    fun downloadApk(context: Context, url: String, name: String): java.io.File {
+    /**
+     * Blocking; downloads APK into cacheDir/updates. Returns the file.
+     * [onProgress] receives 0..1 — Content-Length от GitHub редиректа есть, но при нуле прогресс не считается.
+     */
+    fun downloadApk(
+        context: Context,
+        url: String,
+        name: String,
+        onProgress: (Float) -> Unit = {},
+    ): java.io.File {
         val dir = java.io.File(context.cacheDir, "updates").apply { mkdirs() }
         // clear previous downloads
         dir.listFiles()?.forEach { it.delete() }
@@ -81,11 +89,19 @@ object UpdateChecker {
         val request = Request.Builder().url(url).get().build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("скачивание: HTTP ${response.code}")
-            val source = response.body?.byteStream()
-                ?: throw IllegalStateException("скачивание: пустой ответ")
-            source.use { input ->
+            val body = response.body ?: throw IllegalStateException("скачивание: пустой ответ")
+            val total = body.contentLength().takeIf { it > 0 }
+            val buf = ByteArray(64 * 1024)
+            var done = 0L
+            body.byteStream().use { input ->
                 java.io.FileOutputStream(target).use { output ->
-                    input.copyTo(output, bufferSize = 64 * 1024)
+                    while (true) {
+                        val read = input.read(buf)
+                        if (read == -1) break
+                        output.write(buf, 0, read)
+                        done += read
+                        if (total != null) onProgress(done.toFloat() / total)
+                    }
                 }
             }
         }

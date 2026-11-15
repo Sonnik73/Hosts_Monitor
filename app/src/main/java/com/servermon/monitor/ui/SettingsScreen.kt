@@ -195,6 +195,7 @@ private fun UpdateSection(currentVersion: String) {
     var status by remember { mutableStateOf("Сборка публикуется в GitHub Releases при каждом изменении.") }
     var updateInfo by remember { mutableStateOf<com.servermon.monitor.net.UpdateChecker.UpdateInfo?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -256,16 +257,21 @@ private fun UpdateSection(currentVersion: String) {
                     onClick = {
                         val info = updateInfo ?: return@Button
                         busy = true
+                        downloadProgress = 0f
                         status = "Скачиваю ${info.apkName}…"
                         scope.launch {
                             try {
                                 val file = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    com.servermon.monitor.net.UpdateChecker.downloadApk(context, info.apkUrl, info.apkName)
+                                    com.servermon.monitor.net.UpdateChecker.downloadApk(
+                                        context, info.apkUrl, info.apkName,
+                                    ) { fraction -> downloadProgress = fraction }
                                 }
+                                downloadProgress = null
                                 status = "Запускаю установку через Android…"
                                 installApk(context, file)
                                 status = "Установщик открыт — подтвердите установку"
                             } catch (e: Exception) {
+                                downloadProgress = null
                                 status = "Ошибка: ${e.message}"
                             }
                             busy = false
@@ -274,6 +280,18 @@ private fun UpdateSection(currentVersion: String) {
                 ) {
                     Text(if (busy) "…" else "Установить")
                 }
+            }
+
+            downloadProgress?.let { p ->
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { p },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Загружено: %.0f%%".format(p * 100),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
