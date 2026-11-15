@@ -441,6 +441,9 @@ class Sampler:
         self.cpu_pct = 0.0
         self.net_rx_bps = 0  # bytes per second
         self.net_tx_bps = 0
+        # Instantaneous per-process stats over the last 1 s window:
+        self.top = []       # [{name, count, cpu_pct, mem_pct}] sorted by cpu
+        self.d_state = 0    # processes waiting on uninterruptible disk IO
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
@@ -459,11 +462,49 @@ class Sampler:
                 pass  # never crash the sampler thread
 
     def _sample(self):
+        try:
+            clk_tck = os.sysconf("SC_CLK_TCK")
+        except (ValueError, OSError, AttributeError):
+            clk_tck = 100
+        try:
+            page = os.sysconf("SC_PAGE_SIZE")
+        except (ValueError, OSError, AttributeError):
+            page = 4096
+
         prev = _proc_stat_cpu() or (0, 1)
         prev_rx, prev_tx = _net_counters()
+        prev_procs = _read_procs()
         time.sleep(1.0)
         cur = _proc_stat_cpu()
         rx, tx = _net_counters()
+        cur_procs = _read_procs()
+
+        total_mb = None
+        mem = get_memory()
+        if mem:
+            total_mb = mem["total_mb"]
+
+        # instantaneous per-process CPU over this 1 s window (100 % = one core)
+        agg = {}
+        d_state = 0
+        for pid, proc in cur_procs.items():
+            ticks, rss, state, comm = proc
+            if state == "D":
+                d_state += 1
+            prev_ticks = prev_procs.get(pid, (0,))[0]
+            delta = max(0, ticks - prev_ticks)
+            cpu = delta / float(clk_tck) * 100.0
+            entry = agg.setdefault(comm, {"name": comm, "count": 0, "cpu_pct": 0.0, "mem_pct": 0.0})
+            entry["count"] += 1
+            entry["cpu_pct"] += cpu
+            if total_mb:
+                entry["mem_pct"] += rss * page / (total_mb * 1024 * 1024) * 100.0
+
+        top = sorted(agg.values(), key=lambda e: -e["cpu_pct"])[:30]
+        for e in top:
+            e["cpu_pct"] = round(e["cpu_pct"], 1)
+            e["mem_pct"] = round(e["mem_pct"], 1)
+
         with self.lock:
             if cur:
                 idle_d = cur[0] - prev[0]
@@ -473,6 +514,39 @@ class Sampler:
                     self.cpu_pct = max(0.0, min(100.0, self.cpu_pct))
             self.net_rx_bps = max(0, rx - prev_rx)
             self.net_tx_bps = max(0, tx - prev_tx)
+            self.top = top
+            self.d_state = d_state
+
+
+def _read_procs():
+    """{pid: (total_ticks, rss_bytes, state, comm)} for all processes."""
+    result = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return result  # not Linux
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % entry, "r", encoding="utf-8", errors="replace") as f:
+                line = f.readline()
+            start = line.index("(")
+            end = line.rindex(")")
+            comm = line[start + 1:end]
+            rest = line[end + 2:].split()
+            state = rest[0]
+            ticks = int(rest[11]) + int(rest[12])  # utime + stime
+            rss = 0
+            try:
+                with open("/proc/%s/statm" % entry, "r", encoding="utf-8") as f:
+                    rss = int(f.read().split()[1]) * 4096  # resident pages
+            except (OSError, ValueError, IndexError):
+                pass
+            result[int(entry)] = (ticks, rss, state, comm)
+        except (OSError, ValueError, IndexError):
+            continue
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -502,15 +576,20 @@ def collect_metrics(config, sampler):
     with sampler.lock:
         cpu_pct = sampler.cpu_pct
         rx_bps, tx_bps = sampler.net_rx_bps, sampler.net_tx_bps
+        top = sampler.top
+        d_state = sampler.d_state
+    loadavg = get_loadavg()
+    cores = get_cpu_count()
     return {
         "agent_version": 2,
         "timestamp": int(time.time()),
         "hostname": get_hostname(),
         "uptime_sec": get_uptime_seconds(),
         "cpu": {
-            "cores": get_cpu_count(),
+            "cores": cores,
             "usage_pct": cpu_pct,
-            "loadavg": get_loadavg(),
+            "loadavg": loadavg,
+            "load_per_core": round(loadavg["5"] / max(1, cores), 2),
             "temp_c": get_cpu_temperature(),
         },
         "memory": memory,
@@ -523,7 +602,10 @@ def collect_metrics(config, sampler):
         "services": services,
         "watched_processes": watched_processes,
         "peers": peers,
-        "top_processes": get_top_processes(15),
+        # instantaneous per-process CPU over the agent's sampling window —
+        # ps's lifetime averages hide the real culprits (kswapd, D-state storms)
+        "top_processes": top[:15],
+        "io_wait_procs": d_state,
         "failed_ssh_logins_24h": get_failed_ssh_logins(),
     }
 

@@ -235,6 +235,18 @@ private fun DetailContent(
                 KeyValue("Uptime", formatUptime(m.uptimeSec))
                 KeyValue("Ядер CPU", m.cpu.cores.toString())
                 KeyValue("Соединений (ESTABLISHED)", m.network.established.toString())
+                m.cpu.loadPerCore?.let {
+                    KeyValue(
+                        "Load на ядро (5 мин)",
+                        "%.2f".format(it),
+                    )
+                }
+                m.ioWaitProcs?.let {
+                    KeyValue(
+                        "Ожидают диск (D-state)",
+                        it.toString(),
+                    )
+                }
                 m.cpu.tempC?.let { KeyValue("Температура CPU", "%.0f °C".format(it)) }
             }
         }
@@ -389,6 +401,12 @@ private fun DetailContent(
 
         item {
             Section("Топ процессов") {
+                Text(
+                    "Мгновенные значения (окно агента ~5 с). «Средние за всю жизнь» в ps часто скрывают " +
+                        "настоящих виновников — kswapd и процессы в D-state.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 for (p in m.topProcesses) {
                     KeyValue(
                         p.name,

@@ -32,6 +32,7 @@ data class Metrics(
     @SerialName("watched_processes") val watchedProcesses: Map<String, Int> = emptyMap(),
     val peers: List<PeerCheck> = emptyList(),
     @SerialName("top_processes") val topProcesses: List<ProcessInfo> = emptyList(),
+    @SerialName("io_wait_procs") val ioWaitProcs: Int? = null,
     @SerialName("failed_ssh_logins_24h") val failedSshLogins24h: Int? = null,
 )
 
@@ -40,6 +41,7 @@ data class CpuInfo(
     val cores: Int = 0,
     @SerialName("usage_pct") val usagePct: Double = 0.0,
     @Serializable(with = LoadAvgSerializer::class) val loadavg: LoadAvg = LoadAvg(),
+    @SerialName("load_per_core") val loadPerCore: Double? = null,
     @SerialName("temp_c") val tempC: Double? = null,
 )
 
